@@ -2184,7 +2184,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
             nValueIn += view.GetValueIn(tx);
             if (tx.IsCoinStake()) {
                 nStakeReward = view.GetValueIn(tx) - tx.GetValueOut();
-            } else { 
+            } else {
                 nFees += view.GetValueIn(tx) - tx.GetValueOut();
             }
 
@@ -2237,7 +2237,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
 
     if (!control.Wait())
         return state.DoS(100, false);
-    
+
     int64_t nTime2 = GetTimeMicros();
     nTimeVerify += nTime2 - nTimeStart;
     LogPrint("bench", "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs]\n", nInputs - 1, 0.001 * (nTime2 - nTimeStart), nInputs <= 1 ? 0 : 0.001 * (nTime2 - nTimeStart) / (nInputs - 1), nTimeVerify * 0.000001);
@@ -2783,7 +2783,9 @@ bool ActivateBestChain(CValidationState& state, CBlock* pblock)
             {
                 LOCK(cs_vNodes);
                 BOOST_FOREACH (CNode* pnode, vNodes)
-                    if (chainActive.Height() > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : nBlockEstimate))
+
+                   // Allow node send new block to all peers
+                   // if (chainActive.Height() > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : nBlockEstimate))
                         pnode->PushInventory(CInv(MSG_BLOCK, hashNewTip));
             }
             // Notify external listeners about the new tip.
@@ -3202,7 +3204,7 @@ bool CheckWork(const CBlock &block, CBlockIndex* const pindexPrev)
         }
         if (stake->GetProof(hash, proof)) {
             if (proof != hashProofOfStake)
-                return error("%s: diverged stake %s, %s (block %s)\n", __func__, 
+                return error("%s: diverged stake %s, %s (block %s)\n", __func__,
                              hashProofOfStake.GetHex(), proof.GetHex(), hash.GetHex());
         } else {
             stake->SetProof(hash, hashProofOfStake);
@@ -3465,7 +3467,7 @@ bool ProcessNewBlock(CValidationState& state, CNode* pfrom, CBlock* pblock, CDis
         return error("%s: duplicate proof-of-stake for block %s", __func__, pblock->GetHash().GetHex());
 
 #   if 1 // Shouldn't send messages here to sync, prev blocks should have to be existed.
-    
+
     // Check if the prev block is our prev block, if not then request sync and return false
     else if (pblock->GetHash() != Params().HashGenesisBlock() && pfrom != NULL) {
         BlockMap::iterator mi = mapBlockIndex.find(pblock->hashPrevBlock);
@@ -3474,7 +3476,7 @@ bool ProcessNewBlock(CValidationState& state, CNode* pfrom, CBlock* pblock, CDis
             return false;
         }
     }
-    
+
 #   endif
 
     CBlockIndex* pindex = NULL;
@@ -3494,7 +3496,7 @@ bool ProcessNewBlock(CValidationState& state, CNode* pfrom, CBlock* pblock, CDis
         }
 
         CheckBlockIndex();
-        
+
         if (ret) {
             break;
         } else {
@@ -4967,17 +4969,21 @@ static bool ProcessMessage(CNode* pfrom, const string &strCommand, CDataStream& 
         LogPrint("net", "received block %s peer=%d\n", inv.hash.ToString(), pfrom->id);
 
         //sometimes we will be sent their most recent block and its not the one we want, in that case tell where we are
-        if (!mapBlockIndex.count(block.hashPrevBlock)) {
-            if (find(pfrom->vBlockRequested.begin(), pfrom->vBlockRequested.end(), hashBlock) != pfrom->vBlockRequested.end()) {
-                //we already asked for this block, so lets work backwards and ask for the previous block
-                pfrom->PushMessage("getblocks", chainActive.GetLocator(), block.hashPrevBlock);
-                pfrom->vBlockRequested.push_back(block.hashPrevBlock);
-            } else {
-                //ask to sync to this block
-                pfrom->PushMessage("getblocks", chainActive.GetLocator(), hashBlock);
-                pfrom->vBlockRequested.push_back(hashBlock);
+        if(!mapBlockIndex.count(block.hashPrevBlock) && (!pfrom->fAskedReorg || pfrom->fAbleToReorg))
+        {
+            if(IsInitialBlockDownload())
+                pfrom->PushMessage("getblocks", chainActive.GetLocator(), uint256(0));
+            else
+            {
+                //since our last block hash does not match, we will initiate reorg communications with this node
+                CBlockIndex* pindexMaxReorg = chainActive[chainActive.Tip()->nHeight - Params().MaxReorganizationDepth() + 1];
+                pfrom->PushMessage("abletoreorg", pindexMaxReorg->GetBlockHash(), pindexMaxReorg->nHeight);
+                pfrom->fAskedReorg = true;
             }
+
         } else {
+            pfrom->fAskedReorg = false;
+            pfrom->fAbleToReorg = true;
             pfrom->AddInventoryKnown(inv);
 
             CValidationState state;
@@ -4994,6 +5000,34 @@ static bool ProcessMessage(CNode* pfrom, const string &strCommand, CDataStream& 
         }
 
     }
+
+            //the peer is sending us their block height and hash of the block furthest in their chain that is able to be reorganized
+          else if (strCommand == "abletoreorg" && !fImporting && !fReindex)
+            {
+            uint256 hashBlock;
+            unsigned int nHeight;
+            vRecv >> hashBlock >> nHeight;
+
+            //if our hashes match, we can reorg with this peer
+          bool fAbleToReorg = (chainActive[nHeight]->GetBlockHash() == hashBlock ? true : false);
+            pfrom->fAbleToReorg = fAbleToReorg;
+            pfrom->PushMessage("reorgresponse", hashBlock, nHeight, fAbleToReorg);
+            }
+
+          else if (strCommand == "reorgresponse" && !fImporting && !fReindex)
+            {
+            uint256 hashBlock;
+            unsigned int nHeight;
+            bool fAbleToReorg;
+            vRecv >> hashBlock >> nHeight >> fAbleToReorg;
+
+            //if we can reorg, then request all blocks since the max reorg block we sent earlier
+          if(fAbleToReorg)
+            pfrom->PushMessage("getblocks", chainActive.GetLocator(chainActive[nHeight]), uint256(0));
+
+            pfrom->fAbleToReorg = fAbleToReorg;
+
+            }
 
 
     // This asymmetric behavior for inbound and outbound connections was introduced
