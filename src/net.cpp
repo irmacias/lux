@@ -1993,8 +1993,8 @@ CNode::CNode(SOCKET hSocketIn, CAddress addrIn, std::string addrNameIn, bool fIn
     nPingUsecTime = 0;
     fPingQueued = false;
     fDarkSendMaster = false;
-    fAskedReorg = false;
-    fAbleToReorg = true;
+    /*fAskedReorg = false;
+    fAbleToReorg = true;*/
 
     {
         LOCK(cs_nLastNodeId);

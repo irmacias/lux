@@ -4969,21 +4969,23 @@ static bool ProcessMessage(CNode* pfrom, const string &strCommand, CDataStream& 
         LogPrint("net", "received block %s peer=%d\n", inv.hash.ToString(), pfrom->id);
 
         //sometimes we will be sent their most recent block and its not the one we want, in that case tell where we are
-        if(!mapBlockIndex.count(block.hashPrevBlock) && (!pfrom->fAskedReorg || pfrom->fAbleToReorg))
+        if(!mapBlockIndex.count(block.hashPrevBlock))
         {
-            if(IsInitialBlockDownload())
-                pfrom->PushMessage("getblocks", chainActive.GetLocator(), uint256(0));
+            if(find(pfrom->vBlockRequested.begin(), pfrom->vBlockRequested.end(), hashBlock) != pfrom->vBlockRequested.end())
+            {
+                //we already asked for this block, so lets work backwards and ask for the previous block
+                pfrom->PushMessage("getblocks", chainActive.GetLocator(), block.hashPrevBlock);
+                pfrom->vBlockRequested.push_back(block.hashPrevBlock);
+            }
             else
             {
-                //since our last block hash does not match, we will initiate reorg communications with this node
-                CBlockIndex* pindexMaxReorg = chainActive[chainActive.Tip()->nHeight - Params().MaxReorganizationDepth() + 1];
-                pfrom->PushMessage("abletoreorg", pindexMaxReorg->GetBlockHash(), pindexMaxReorg->nHeight);
-                pfrom->fAskedReorg = true;
+                //ask to sync to this block
+                pfrom->PushMessage("getblocks", chainActive.GetLocator(), hashBlock);
+                pfrom->vBlockRequested.push_back(hashBlock);
             }
-
-        } else {
-            pfrom->fAskedReorg = false;
-            pfrom->fAbleToReorg = true;
+        }
+        else
+        {
             pfrom->AddInventoryKnown(inv);
 
             CValidationState state;
@@ -4991,18 +4993,18 @@ static bool ProcessMessage(CNode* pfrom, const string &strCommand, CDataStream& 
             int nDoS;
             if (state.IsInvalid(nDoS)) {
                 pfrom->PushMessage("reject", strCommand, state.GetRejectCode(),
-                    state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), inv.hash);
+                                   state.GetRejectReason().substr(0, MAX_REJECT_MESSAGE_LENGTH), inv.hash);
                 if (nDoS > 0) {
                     TRY_LOCK(cs_main, lockMain);
-                    if (lockMain) Misbehaving(pfrom->GetId(), nDoS);
+                    if(lockMain) Misbehaving(pfrom->GetId(), nDoS);
                 }
             }
         }
 
     }
 
-            //the peer is sending us their block height and hash of the block furthest in their chain that is able to be reorganized
-          else if (strCommand == "abletoreorg" && !fImporting && !fReindex)
+          //the peer is sending us their block height and hash of the block furthest in their chain that is able to be reorganized
+          /*else if (strCommand == "abletoreorg" && !fImporting && !fReindex)
             {
             uint256 hashBlock;
             unsigned int nHeight;
@@ -5027,8 +5029,7 @@ static bool ProcessMessage(CNode* pfrom, const string &strCommand, CDataStream& 
 
             pfrom->fAbleToReorg = fAbleToReorg;
 
-            }
-
+            }*/
 
     // This asymmetric behavior for inbound and outbound connections was introduced
     // to prevent a fingerprinting attack: an attacker can send specific fake addresses
