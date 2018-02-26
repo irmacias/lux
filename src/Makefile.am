@@ -579,7 +579,8 @@ lux_tx_LDADD = \
   $(LIBSECP256K1) \
   $(BOOST_LIBS) \
   $(CRYPTO_LIBS) \
-  $(LIBCRYPTOPP)
+  $(LIBCRYPTOPP) \
+  $(LIBSECP256K1)
 
 lux_tx_SOURCES = lux-tx.cpp
 lux_tx_CPPFLAGS = $(BITCOIN_INCLUDES)
