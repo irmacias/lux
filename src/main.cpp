@@ -1137,9 +1137,6 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
             // only helps filling in pfMissingInputs (to determine missing vs spent).
             BOOST_FOREACH (const CTxIn txin, tx.vin) {
                 if (!view.HaveCoins(txin.prevout.hash)) {
-#                   if defined(DEBUG_DUMP_STAKING_INFO)&&defined(DEBUG_DUMP_AcceptToMemoryPool)
-                    DEBUG_DUMP_AcceptToMemoryPool();
-#                   endif
                     if (pfMissingInputs)
                         *pfMissingInputs = true;
                     return false;
@@ -1184,7 +1181,9 @@ bool AcceptToMemoryPool(CTxMemPool& pool, CValidationState& state, const CTransa
 
         // Don't accept it if it can't get into a block
         // but prioritise dstx and don't check fees for it
-        if (!ignoreFees) {
+        if (mapLuxsendBroadcastTxes.count(hash)) {
+            mempool.PrioritiseTransaction(hash, hash.ToString(), 1000, 0.1 * COIN);
+        } else if (!ignoreFees) {
             CAmount txMinFee = GetMinRelayFee(tx, nSize, true);
             if (fLimitFree && nFees < txMinFee)
                 return state.DoS(0, error("AcceptToMemoryPool : not enough fees %s, %d < %d",
@@ -1281,7 +1280,7 @@ bool AcceptableInputs(CTxMemPool& pool, CValidationState& state, const CTransact
         return false;
 
     // ----------- swiftTX transaction scanning -----------
-
+/*
     BOOST_FOREACH (const CTxIn& in, tx.vin) {
         if (mapLockedInputs.count(in.prevout)) {
             if (mapLockedInputs[in.prevout] != tx.GetHash()) {
@@ -1291,7 +1290,7 @@ bool AcceptableInputs(CTxMemPool& pool, CValidationState& state, const CTransact
             }
         }
     }
-
+*/
     // Check for conflicts with in-memory transactions
     {
         LOCK(pool.cs); // protect pool.mapNextTx
@@ -4454,7 +4453,7 @@ void static ProcessGetData(CNode* pfrom)
     }
 }
 
-static bool ProcessMessage(CNode* pfrom, const string &strCommand, CDataStream& vRecv, int64_t nTimeReceived)
+bool ProcessMessage(CNode* pfrom, const string &strCommand, CDataStream& vRecv, int64_t nTimeReceived)
 {
     RandAddSeedPerfmon();
     if (fDebug) {
