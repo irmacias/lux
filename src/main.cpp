@@ -3528,7 +3528,7 @@ bool ProcessNewBlock(CValidationState& state, CNode* pfrom, CBlock* pblock, CDis
 
     return true;
 }
-
+// TODO DEPLOYMENT_SEGWIT
 bool IsWitnessEnabled(const CBlockIndex* pindexPrev){
     LOCK(cs_main);
     return true;
